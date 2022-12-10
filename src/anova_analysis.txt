@@ -1,0 +1,41 @@
+library(data.table)
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+
+rna<-fread("rna_tissue_consensus.tsv")
+
+rna$nTPM<-log2(rna$nTPM+1)
+
+
+rna_delete <- rna %>% 
+  group_by(`Gene name`) %>% 
+  summarise(variance = var(nTPM),
+            means = mean(nTPM)) %>% 
+  dplyr::filter(variance==0 & means==0)
+
+rna %<>% dplyr::filter(!`Gene name` %in% rna_delete$`Gene name`)
+
+brain <- c("amygdala","basal ganglia","cerebellum","cerebral cortex","hippocampal formation","hypothalamus",
+           "midbrain","pituitary gland","pons","thalamus","white matter")
+
+wuguan <- c("retina","salivary gland","tongue")
+  
+sex <- c("cervix","endometrium","epididymis","fallopian tube","ovary","placenta","seminal vesicle","prostate","testis","vagina")
+
+rna %<>% 
+  dplyr::mutate(Tissue2 = case_when(Tissue %in% brain ~ "Brain",
+                                   Tissue %in% wuguan ~ "wuguan",
+                                   Tissue %in% sex ~ "sex",
+                                   TRUE ~ "other"))
+
+pval<-rna %>% split(.$`Gene name`) %>% 
+  map(function(x){
+    anova(aov(nTPM~Tissue2, x))$`Pr(>F)`[1] 
+  })
+anova.res<-cbind(path=names(pval),p=as.numeric(unlist(pval))) %>% as.data.frame()
+anova.res %<>% arrange(p)
+anova.res$fdr<-p.adjust(anova.res$p,method = "BH",n = nrow(anova.res)) 
+
+anova.res_conserve <- anova.res %>% top_frac(0.1,fdr)
+anova.res_specifc <- anova.res[anova.res$fdr<0.0001,]
